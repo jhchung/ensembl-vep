@@ -15,7 +15,8 @@ RUN apt-get update && apt-get -y install \
     perl \
     perl-base \
     unzip \
-    wget && \
+    wget \
+    libncurses-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup VEP environment
@@ -23,6 +24,7 @@ ENV OPT /opt/vep
 ENV OPT_SRC $OPT/src
 ENV HTSLIB_DIR $OPT_SRC/htslib
 ENV BRANCH release/105
+ENV SAMTOOLS_DIR /opt/samtools
 
 # Working directory
 WORKDIR $OPT_SRC
@@ -72,6 +74,16 @@ RUN perl -pi -e"s|(cd libs.+)CFLAGS=\\\'|\$1CFLAGS=\\\'-fPIC |" Makefile.PL
 WORKDIR $HTSLIB_DIR
 RUN make install && rm -f Makefile *.c
 
+# Install samtools
+WORKDIR $SAMTOOLS_DIR
+RUN wget https://github.com/samtools/samtools/releases/download/1.15.1/samtools-1.15.1.tar.bz2 && \
+    tar -xf samtools-1.15.1.tar.bz2 && \
+    cd samtools-1.15.1 && \
+    ./configure --prefix=$SAMTOOLS_DIR && \
+    make && \ 
+    make install
+
+
 # Compile Variation LD C scripts
 WORKDIR $OPT_SRC/var_c_code
 RUN make && rm -f Makefile *.c
@@ -108,12 +120,13 @@ RUN apt-get update && apt-get -y install \
 ENV OPT /opt/vep
 ENV OPT_SRC $OPT/src
 ENV PERL5LIB_TMP $PERL5LIB:$OPT_SRC/ensembl-vep:$OPT_SRC/ensembl-vep/modules
-ENV PERL5LIB $PERL5LIB_TMP:$OPT_SRC/bioperl-live
+ENV PERL5LIB $PERL5LIB_TMP:$OPT_SRC/bioperl-live:/usr/local/share/perl/5.26.1
 ENV KENT_SRC $OPT/src/kent-335_base/src
 ENV HTSLIB_DIR $OPT_SRC/htslib
+ENV SAMTOOLS_DIR /opt/samtools
 ENV MACHTYPE x86_64
 ENV DEPS $OPT_SRC
-ENV PATH $OPT_SRC/ensembl-vep:$OPT_SRC/var_c_code:$PATH
+ENV PATH $OPT_SRC/ensembl-vep:$OPT_SRC/var_c_code:$SAMTOOLS_DIR/bin:$PATH
 ENV LANG_VAR en_US.UTF-8
 
 # Create vep user
@@ -122,6 +135,7 @@ USER vep
 
 # Copy downloaded libraries (stage 1) to this image (stage 2)
 COPY --chown=vep:vep --from=builder $OPT_SRC $OPT_SRC
+COPY --chown=vep:vep --from=builder $SAMTOOLS_DIR $SAMTOOLS_DIR
 #############################################################
 
 # Change user to root for the following complilations/installations
@@ -143,6 +157,8 @@ RUN ensembl-vep/travisci/build_c.sh && \
     # Install ensembl perl dependencies (cpanm)
     cpanm --installdeps --with-recommends --notest --cpanfile ensembl_cpanfile . && \
     cpanm --installdeps --with-recommends --notest --cpanfile ensembl-vep/cpanfile . && \
+    cpanm install DBD::SQLite && \
+    rm -fr root/.cpanm  && \
     # Delete bioperl and cpanfiles after the cpanm installs as bioperl will be reinstalled by the INSTALL.pl script
     rm -rf bioperl-live ensembl_cpanfile ensembl-vep/cpanfile && \
     # Configure "locale", see https://github.com/rocker-org/rocker/issues/19
@@ -150,6 +166,7 @@ RUN ensembl-vep/travisci/build_c.sh && \
     /usr/sbin/update-locale LANG=$LANG_VAR && \
     # Copy htslib executables. It also requires the packages 'zlib1g-dev', 'libbz2-dev' and 'liblzma-dev'
     cp $HTSLIB_DIR/bgzip $HTSLIB_DIR/tabix $HTSLIB_DIR/htsfile /usr/local/bin/
+    
 
 ENV LC_ALL $LANG_VAR
 ENV LANG $LANG_VAR
